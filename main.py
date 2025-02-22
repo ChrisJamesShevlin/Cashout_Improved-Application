@@ -79,10 +79,18 @@ def calculate_decision():
         combined_xg = match_data.xg_fav + match_data.xg_underdog
         p_goal += 0.02 * combined_xg if combined_xg >= 1.2 else -0.10
         
-        if match_data.underdog_goals > match_data.fav_goals:
-            p_goal += 0.04
-        elif match_data.fav_goals > match_data.underdog_goals:
-            p_goal -= 0.04
+        # Determine which team contributes more to goal probability
+        fav_contribution = (match_data.xg_fav * 0.4) + (match_data.sot_fav * 0.3) + (match_data.fav_goals * 0.3)
+        underdog_contribution = (match_data.xg_underdog * 0.4) + (match_data.sot_underdog * 0.3) + (match_data.underdog_goals * 0.3)
+
+        if fav_contribution > underdog_contribution:
+            goal_source = "Favourite"
+            p_goal -= 0.04  # Slight bias towards stronger team
+        elif underdog_contribution > fav_contribution:
+            goal_source = "Underdog"
+            p_goal += 0.04  # More variance for weaker team scoring
+        else:
+            goal_source = "Even"
 
         p_goal = min(max(p_goal, 0), 1.0)
 
@@ -125,7 +133,7 @@ def calculate_decision():
 
         result_label["text"] = (
             f"Updated Edge: {updated_edge:.4f}\n"
-            f"Goal Probability: {p_goal:.2%}\n"
+            f"Goal Probability: {p_goal:.2%} ({goal_source})\n"
             f"EV Hold: {ev_hold:.4f}\n"
             f"EV Cashout: {ev_cashout:.4f}\n"
             f"Decision: {decision}"
