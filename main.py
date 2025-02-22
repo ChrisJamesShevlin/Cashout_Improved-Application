@@ -23,28 +23,29 @@ class MatchMemory:
     def update_memory(self, current_data):
         self.previous_data = current_data
 
-    def is_improving(self, current_data):
+    def is_improving(self, current_data, thresholds):
         if not self.previous_data:
             return False
 
         improvement = False
+        if current_data.match_time < 60:
+            match_time_factor = 1.0  # Full sensitivity early
+        elif current_data.match_time < 80:
+            match_time_factor = 0.8  # Slightly reduced
+        else:
+            match_time_factor = 0.6  # Even less sensitive late
+
         if current_data.lay_choice == "Underdog":
             improvement = (
-                current_data.sot_underdog > self.previous_data.sot_underdog or
-                current_data.xg_underdog > self.previous_data.xg_underdog or
-                current_data.possession_underdog > self.previous_data.possession_underdog
+                (current_data.sot_underdog - self.previous_data.sot_underdog) > thresholds['sot'] * match_time_factor or
+                (current_data.xg_underdog - self.previous_data.xg_underdog) > thresholds['xg'] * match_time_factor or
+                (current_data.possession_underdog - self.previous_data.possession_underdog) > thresholds['possession'] * match_time_factor
             )
         elif current_data.lay_choice == "Favourite":
             improvement = (
-                current_data.sot_fav > self.previous_data.sot_fav or
-                current_data.xg_fav > self.previous_data.xg_fav or
-                current_data.possession_fav > self.previous_data.possession_fav
-            )
-        elif current_data.lay_choice == "Draw":
-            improvement = (
-                (current_data.sot_fav == self.previous_data.sot_fav and current_data.sot_underdog == self.previous_data.sot_underdog) or
-                (current_data.xg_fav == self.previous_data.xg_fav and current_data.xg_underdog == self.previous_data.xg_underdog) or
-                (current_data.possession_fav == self.previous_data.possession_fav and current_data.possession_underdog == self.previous_data.possession_underdog)
+                (current_data.sot_fav - self.previous_data.sot_fav) > thresholds['sot'] * match_time_factor or
+                (current_data.xg_fav - self.previous_data.xg_fav) > thresholds['xg'] * match_time_factor or
+                (current_data.possession_fav - self.previous_data.possession_fav) > thresholds['possession'] * match_time_factor
             )
 
         return improvement
@@ -101,7 +102,7 @@ def calculate_decision():
         decision = "Hold"
         if likely_draw:
             decision = "Cash Out"
-        elif ev_cashout > ev_hold + 0.05 and match_data.match_time >= 80:
+        elif ev_cashout > ev_hold + 0.07 and match_data.match_time >= 80:  # Increased threshold to reduce noise
             decision = "Cash Out"
         
         if match_data.match_time >= 85 and p_goal < 12 / 100:
@@ -112,8 +113,14 @@ def calculate_decision():
             if match_data.xg_underdog > match_data.xg_fav and match_data.possession_underdog > match_data.possession_fav:
                 decision = "Cash Out"
 
-        # Check if the underdog is improving on stats
-        if memory.is_improving(match_data):
+        # Check if the underdog is improving on stats with dynamic thresholds
+        thresholds = {
+            'sot': 1.0 if match_data.match_time < 60 else 1.5,  # More lenient late-game
+            'xg': 0.2 if match_data.match_time < 60 else 0.4,   # Requires bigger xG change
+            'possession': 3.0 if match_data.match_time < 60 else 6.0  # Requires bigger possession gap
+        }
+        
+        if memory.is_improving(match_data, thresholds) and match_data.underdog_goals == 0:
             decision = "Cash Out"
 
         result_label["text"] = (
