@@ -17,40 +17,50 @@ class MatchData:
         self.lay_choice = lay_choice
 
 class MatchMemory:
-    def __init__(self):
-        self.previous_data = None
+    def __init__(self, history_length=10):
+        self.history_length = history_length
+        self.history = []
 
     def update_memory(self, current_data):
-        self.previous_data = current_data
+        """Store past records, keeping only the last `history_length` entries."""
+        if len(self.history) >= self.history_length:
+            self.history.pop(0)  # Remove oldest entry to keep history size constant
+        self.history.append(current_data)
 
-    def is_improving(self, current_data, thresholds):
-        if not self.previous_data:
-            return False
+    def get_average_momentum(self):
+        """Calculate the average trend over the stored history."""
+        if len(self.history) < 2:
+            return None  # Not enough data points for momentum calculation
 
-        improvement = False
-        if current_data.match_time < 60:
-            match_time_factor = 1.0  # Full sensitivity early
-        elif current_data.match_time < 80:
-            match_time_factor = 0.8  # Slightly reduced
-        else:
-            match_time_factor = 0.6  # Even less sensitive late
+        total_sot_fav, total_sot_underdog = 0, 0
+        total_xg_fav, total_xg_underdog = 0, 0
+        total_possession_fav, total_possession_underdog = 0, 0
 
-        if current_data.lay_choice == "Underdog":
-            improvement = (
-                (current_data.sot_underdog - self.previous_data.sot_underdog) > thresholds['sot'] * match_time_factor or
-                (current_data.xg_underdog - self.previous_data.xg_underdog) > thresholds['xg'] * match_time_factor or
-                (current_data.possession_underdog - self.previous_data.possession_underdog) > thresholds['possession'] * match_time_factor
-            )
-        elif current_data.lay_choice == "Favourite":
-            improvement = (
-                (current_data.sot_fav - self.previous_data.sot_fav) > thresholds['sot'] * match_time_factor or
-                (current_data.xg_fav - self.previous_data.xg_fav) > thresholds['xg'] * match_time_factor or
-                (current_data.possession_fav - self.previous_data.possession_fav) > thresholds['possession'] * match_time_factor
-            )
+        for data in self.history:
+            total_sot_fav += data.sot_fav
+            total_sot_underdog += data.sot_underdog
+            total_xg_fav += data.xg_fav
+            total_xg_underdog += data.xg_underdog
+            total_possession_fav += data.possession_fav
+            total_possession_underdog += data.possession_underdog
 
-        return improvement
+        avg_sot_fav = total_sot_fav / len(self.history)
+        avg_sot_underdog = total_sot_underdog / len(self.history)
+        avg_xg_fav = total_xg_fav / len(self.history)
+        avg_xg_underdog = total_xg_underdog / len(self.history)
+        avg_possession_fav = total_possession_fav / len(self.history)
+        avg_possession_underdog = total_possession_underdog / len(self.history)
 
-memory = MatchMemory()
+        return {
+            "sot_fav": avg_sot_fav,
+            "sot_underdog": avg_sot_underdog,
+            "xg_fav": avg_xg_fav,
+            "xg_underdog": avg_xg_underdog,
+            "possession_fav": avg_possession_fav,
+            "possession_underdog": avg_possession_underdog,
+        }
+
+memory = MatchMemory(history_length=10)  # Store last 10 updates
 
 def calculate_decision():
     try:
@@ -127,9 +137,43 @@ def calculate_decision():
             'xg': 0.2 if match_data.match_time < 60 else 0.4,   # Requires bigger xG change
             'possession': 3.0 if match_data.match_time < 60 else 6.0  # Requires bigger possession gap
         }
+
+        average_momentum = memory.get_average_momentum()
         
-        if memory.is_improving(match_data, thresholds) and match_data.underdog_goals == 0:
-            decision = "Cash Out"
+        if average_momentum:
+            # Calculate recent trend by comparing last momentum to current input
+            recent_trend_sot_underdog = match_data.sot_underdog - average_momentum["sot_underdog"]
+            recent_trend_xg_underdog = match_data.xg_underdog - average_momentum["xg_underdog"]
+            recent_trend_possession_underdog = match_data.possession_underdog - average_momentum["possession_underdog"]
+
+            recent_trend_sot_fav = match_data.sot_fav - average_momentum["sot_fav"]
+            recent_trend_xg_fav = match_data.xg_fav - average_momentum["xg_fav"]
+            recent_trend_possession_fav = match_data.possession_fav - average_momentum["possession_fav"]
+
+            # Set dynamic thresholds for early/mid/late-game
+            if match_data.match_time < 60:
+                sot_threshold, xg_threshold, possession_threshold = 1.0, 0.2, 3.0
+            elif match_data.match_time < 80:
+                sot_threshold, xg_threshold, possession_threshold = 1.5, 0.4, 6.0
+            else:
+                sot_threshold, xg_threshold, possession_threshold = 2.0, 0.6, 8.0  # More lenient late-game
+
+            # If the underdog is gaining momentum at a higher rate than expected, consider cashing out
+            if match_data.lay_choice == "Underdog":
+                if (
+                    recent_trend_sot_underdog > sot_threshold or
+                    recent_trend_xg_underdog > xg_threshold or
+                    recent_trend_possession_underdog > possession_threshold
+                ):
+                    decision = "Cash Out (Underdog Momentum Increasing)"
+
+            elif match_data.lay_choice == "Favourite":
+                if (
+                    recent_trend_sot_fav > sot_threshold or
+                    recent_trend_xg_fav > xg_threshold or
+                    recent_trend_possession_fav > possession_threshold
+                ):
+                    decision = "Cash Out (Favourite Momentum Increasing)"
 
         result_label["text"] = (
             f"Updated Edge: {updated_edge:.4f}\n"
