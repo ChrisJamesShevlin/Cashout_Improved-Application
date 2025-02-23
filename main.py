@@ -81,16 +81,15 @@ def calculate_decision():
         combined_xg = match_data.xg_fav + match_data.xg_underdog
         p_goal += 0.02 * combined_xg if combined_xg >= 1.2 else -0.10
         
-        # Determine which team contributes more to goal probability
         fav_contribution = (match_data.xg_fav * 0.4) + (match_data.sot_fav * 0.3) + (match_data.fav_goals * 0.3)
         underdog_contribution = (match_data.xg_underdog * 0.4) + (match_data.sot_underdog * 0.3) + (match_data.underdog_goals * 0.3)
 
         if fav_contribution > underdog_contribution:
             goal_source = "Favourite"
-            p_goal -= 0.04  # Slight bias towards stronger team
+            p_goal -= 0.04  
         elif underdog_contribution > fav_contribution:
             goal_source = "Underdog"
-            p_goal += 0.04  # More variance for weaker team scoring
+            p_goal += 0.04  
         else:
             goal_source = "Even"
 
@@ -112,28 +111,23 @@ def calculate_decision():
         decision = "Hold"
         if likely_draw:
             decision = "Cash Out"
-        elif ev_cashout > ev_hold + 0.07 and match_data.match_time >= 80:  # Increased threshold to reduce noise
+        elif ev_cashout > ev_hold + 0.07 and match_data.match_time >= 80:
             decision = "Cash Out"
         
         if match_data.match_time >= 85 and p_goal < 12 / 100:
             decision = "Cash Out"
 
-        # Additional logic for laying the underdog
-        if match_data.lay_choice == "Underdog" and match_data.underdog_goals == 0 and match_data.fav_goals == 1:
-            if match_data.xg_underdog > match_data.xg_fav and match_data.possession_underdog > match_data.possession_fav:
-                decision = "Cash Out"
+        ### ADDED LOGIC: HANDLE ALL LAY CASES BASED ON MOMENTUM ###
 
-        # Check if the underdog is improving on stats with dynamic thresholds
         thresholds = {
-            'sot': 0.75 if match_data.match_time < 60 else 1.2,  # More lenient late-game
-            'xg': 0.15 if match_data.match_time < 60 else 0.35,   # Requires bigger xG change
-            'possession': 2.5 if match_data.match_time < 60 else 5.0  # Requires bigger possession gap
+            'sot': 0.75 if match_data.match_time < 60 else 1.2,
+            'xg': 0.15 if match_data.match_time < 60 else 0.35,
+            'possession': 2.5 if match_data.match_time < 60 else 5.0  
         }
 
         average_momentum = memory.get_average_momentum()
         
         if average_momentum:
-            # Rate of improvement per update
             rate_sot_underdog = (match_data.sot_underdog - average_momentum["sot_underdog"]) / max(1, len(memory.history) - 1)
             rate_xg_underdog = (match_data.xg_underdog - average_momentum["xg_underdog"]) / max(1, len(memory.history) - 1)
             rate_possession_underdog = (match_data.possession_underdog - average_momentum["possession_underdog"]) / max(1, len(memory.history) - 1)
@@ -141,21 +135,26 @@ def calculate_decision():
             rate_sot_fav = (match_data.sot_fav - average_momentum["sot_fav"]) / max(1, len(memory.history) - 1)
             rate_xg_fav = (match_data.xg_fav - average_momentum["xg_fav"]) / max(1, len(memory.history) - 1)
             rate_possession_fav = (match_data.possession_fav - average_momentum["possession_fav"]) / max(1, len(memory.history) - 1)
-            
-            # If the underdog is gaining momentum at a higher rate than expected, consider cashing out
-            if match_data.lay_choice == "Underdog" and (
-                rate_sot_underdog > thresholds['sot'] or
-                rate_xg_underdog > thresholds['xg'] or
-                rate_possession_underdog > thresholds['possession']
-            ):
-                decision = "Cash Out (Underdog Gaining Quickly)"
 
-            if match_data.lay_choice == "Favourite" and (
-                rate_sot_fav > thresholds['sot'] or
-                rate_xg_fav > thresholds['xg'] or
-                rate_possession_fav > thresholds['possession']
-            ):
-                decision = "Cash Out (Favourite Gaining Quickly)"
+            if match_data.lay_choice == "Draw":
+                if match_data.fav_goals == match_data.underdog_goals: 
+                    decision = "Cash Out"
+                elif rate_sot_underdog > thresholds['sot'] or rate_xg_underdog > thresholds['xg']:
+                    decision = "Cash Out (Underdog Momentum Increasing)"
+            
+            elif match_data.lay_choice == "Favourite":
+                if match_data.fav_goals > match_data.underdog_goals:  
+                    decision = "Cash Out"
+                elif rate_sot_fav > thresholds['sot'] or rate_xg_fav > thresholds['xg']:
+                    decision = "Cash Out (Favourite Momentum Increasing)"
+            
+            elif match_data.lay_choice == "Underdog":
+                if match_data.underdog_goals > match_data.fav_goals:  
+                    decision = "Cash Out"
+                elif rate_sot_underdog > thresholds['sot'] or rate_xg_underdog > thresholds['xg']:
+                    decision = "Cash Out (Underdog Momentum Increasing)"
+
+        ### END OF ADDED LOGIC ###
 
         result_label["text"] = (
             f"Updated Edge: {updated_edge:.4f}\n"
