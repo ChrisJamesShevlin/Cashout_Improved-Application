@@ -26,6 +26,9 @@ class MatchMemory:
 
     def get_average_momentum(self, alpha=0.6):
         """Applies exponential smoothing to recent trends"""
+        if not self.history:
+            return None
+
         if len(self.history) < 2:
             return {  
                 "sot_fav": self.history[-1].sot_fav, "sot_underdog": self.history[-1].sot_underdog,  
@@ -174,7 +177,7 @@ def reset_fields():
         entry.delete(0, tk.END)
     result_label["text"] = ""
     lay_choice_var.set("Favourite")
-    memory.update_memory(None)
+    memory.history.clear()
 
 root = tk.Tk()
 root.title("Decision Calculator")
